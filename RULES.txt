@@ -1,0 +1,137 @@
+COMMAND DEFINATIONS:
+
+NOTE : ALL THE STRINGS WILL HAVE A LENGTH OF 1024
+
+*********** Master  <->  ChunkServer *********************
+# H - Heartbeat signal from Master to ChunkServer
+# h - State dead/alive etc response from ChunkServer to Master
+# R - Replicate command from master to Chunk_Server 
+#	Format ==> R|chunk_num1,chunk_num2:chunkserver_ip1:chunkserver_port1|
+#                    chunk_num1:chunkserver_ip2:chunkserver_port2
+#       Ex : E|1,5:127.0.0.1:3333|2:127.0.0.1:4444|3,4:127.0.0.1:5555
+# r - From Chunk_server to Master on complete...All replication done
+	Format ==> r|
+
+
+*********** Client  <->  Master *********************
+# U - Client wants to upload(write a file to GFS)
+#       Format ==> U|file_name|file_size|
+#       Example ==> U|GFS.txt|890|
+# D - Client wants to download(read a file to GFS)
+#       Format ==> D|file_name|
+#       Example ==> D|GFS.txt|
+# A - Client to Master
+#	Acknowledegment that Upload has completed
+#       Format ==> A|file_name
+#       Example ==> A|file_name
+# E - Master to client , as a reply to D or U. It sends details of all the chunkservers
+#       Format ==> E|chunk_num1,chunk_num2:chunkserver_ip1:chunkserver_port1|
+#                    chunk_num1:chunkserver_ip2:chunkserver_port2
+#       Ex : E|1,5:127.0.0.1:3333|2:127.0.0.1:4444|3,4:127.0.0.1:5555
+
+
+
+***********  Client <->  ChunkServer *********************
+	Client Download
+# X - Client to chunkServer
+#	Client wants to download
+#	i.e. ChunkServer will GIVE
+#       Format ==> X|chunk_ids
+#       Example ==> X|1,5,9
+# x - ChunkServer to Client
+#	Reply of X 
+#	i.e. ChunkServer will GIVE
+#       Format ==> x|chunk_id      (future use)|(SHA of the chunk to be sent)
+#       Example ==> x|1  send the chunk
+		    x|5	 send the chunk
+		    x|9	 send the chunk
+
+	Client Upload
+# U - Client to chunkServer
+#	Client wants to UPLOAD
+#	i.e. ChunkServer will RECEIVE
+	Format ==> U|chunk_id	(future use)|(SHA of the chunk to be sent)
+#       Example ==> U|1  send the chunk
+		    U|5	 send the chunk
+		    U|9	 send the chunkk
+	
+
+
+
+
+
+*********** Adhoc  *********************
+# N - Number encoded in a string.
+#       Ex : N|12345|
+# T - Text/String data enclosed in the string.
+#       Ex : T|Hello There!|
+	
+
+1. Client -> Master
+    a) Client wants to upload a file
+    b) Client wants to download a file
+2. Master -> Client
+    a) When clients want to upload..
+        List of ChunkServer details.
+3. Matser -> ChunkServer
+4. ChunkServer -> Master
+5. Client -> ChunkServer
+6. ChunkServer -> ChunkServer
+
+*********************************************************************************
+INFO MAINTAINED BY MASTER :
+Metadata such as
+  a) the file names, access control information,
+  b) the location of all the replicas for every chunk of each file,
+  c) the state of individual chunk servers.
+    ## file-to-chunk mapping can/should be stored
+***********************************************************************************
+
+GENERAL RULES :
+1) At the time of file creation each chunk is assgned a unique "chunk_id".
+
+***********************************************************************************
+CONCEPT OF REPLICA AND PRIMARY AND SECONDARY CHUNKS :
+
+The GFS separates replicas into two categories:
+primary replicas and secondary replicas.
+    ** A primary replica is the chunk that a chunkserver sends to a client.
+    ** Secondary replicas serve as backups on other chunkservers.
+       The master server decides which chunks will act as primary or secondary.
+       If the client makes changes to the data in the chunk, then the master
+       server lets the chunkservers with secondary replicas know they have to
+       copy the new chunk off the primary chunkserver to stay current.
+
+***********************************************************************************
+A READ REQUEST is simple --
+The client sends a request to the master server to find out where the client
+ can find a particular file on the system.
+The SERVER RESPONDS WITH THE
+ LOCATION FOR THE PRIMARY REPLICA OF THE RESPECTIVE CHUNK.
+The primary replica holds a lease from the master server for the chunk in question.
+
+
+**********  Exceptional case, mayb not needed for us to implement ***************
+If no replica currently holds a lease, the master server designates a
+ChunkServer as the primary. It does this by comparing the IP address of the
+ client to the addresses of the chunkservers containing the replicas.
+The master server chooses the chunkserver closest to the client.
+That chunkserver's chunk becomes the primary. The client then contacts the
+appropriate chunkserver directly, which sends the replica to the client.
+*************************************************************************************
+
+A WRITE REQUEST --
+The client sends a request to the master server,
+which replies with the location of the primary and secondary replicas.
+The client stores this information in a memory cache.
+That way, if the client needs to refer to the same replica later on,
+it can bypass the master server.
+If the primary replica becomes unavailable or the replica changes,
+the client will have to consult the master server again before contacting a chunkserver.
+
+
+***************************************************************************************
+MUTATION Aftermath ::
+A mutation is an operation that CHANGES THE CONTENTS OR METADATA OF A ChunkServer
+such as a write or an append operation.
+Each mutation is performed at ALL THE CHUNK’S REPLICAS.
